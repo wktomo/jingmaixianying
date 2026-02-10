@@ -1,0 +1,219 @@
+# # Step 2: Vessel Segmentation Configuration
+
+# defaults:
+#   - _self_
+
+# # Experiment
+# experiment_name: "vessel_segmentation_unet"
+# seed: 42
+# device: "cuda"
+# num_gpus: 1
+
+# # Data
+# data:
+#   dataset: "OCTA-500"  # Options: OCTA-500, DRIVE, STARE, custom
+#   processed: "D:/babba/xxx/jingmaixianying/vessel_3d_recon/data/processed"
+#   image_size: [512, 512]
+#   num_workers: 4
+#   pin_memory: true
+  
+#   # Augmentation
+#   augmentation:
+#     enabled: true
+#     random_flip: true
+#     random_rotation: 15
+#     random_scale: [0.9, 1.1]
+#     elastic_transform: true
+#     gaussian_blur: 0.3
+#     brightness_contrast: 0.2
+
+# # Model
+# model:
+#   type: "UNetPlusPlus"  # Options: UNet, UNetPlusPlus, nnUNet
+#   in_channels: 1  # Grayscale images
+#   out_channels: 1  # Binary vessel mask
+#   features: [32, 64, 128, 256, 512]
+#   deep_supervision: true
+#   attention: "scse"  # Spatial-channel squeeze & excitation
+  
+#   # Output heads
+#   output_skeleton: true
+#   output_confidence: true
+
+# # Training
+# training:
+#   batch_size: 2
+#   accumulate_grad_batches: 4  # Effective batch size = 32
+#   max_epochs: 200
+#   val_check_interval: 1.0
+  
+#   # Optimizer
+#   optimizer:
+#     type: "AdamW"
+#     lr: 1e-4
+#     weight_decay: 1e-5
+#     betas: [0.9, 0.999]
+  
+#   # Scheduler
+#   scheduler:
+#     type: "CosineAnnealingLR"
+#     T_max: 200
+#     eta_min: 1e-6
+  
+#   # Mixed precision
+#   use_amp: true
+#   gradient_clip_val: 1.0
+
+# # Loss
+# loss:
+#   # Main segmentation loss
+#   segmentation:
+#     type: "DiceBCE"  # Dice + Binary Cross Entropy
+#     dice_weight: 0.7
+#     bce_weight: 0.3
+  
+#   # Topology-aware loss
+#   topology:
+#     enabled: true
+#     weight: 0.1
+#     type: "ClDice"  # Centerline Dice
+  
+#   # Deep supervision weights (if enabled)
+#   deep_supervision_weights: [1.0, 0.5, 0.25, 0.125]
+
+# # Metrics
+# metrics:
+#   - "Dice"
+#   - "IoU"
+#   - "Precision"
+#   - "Recall"
+#   - "ClDice"  # Skeleton-level metric
+
+# # Logging
+# logging:
+#   use_wandb: true
+#   wandb_project: "vessel-3d-recon"
+#   log_every_n_steps: 50
+#   save_top_k: 3
+#   monitor_metric: "val/Dice"
+#   monitor_mode: "max"
+
+# # Checkpoint
+# checkpoint:
+#   dirpath: "checkpoints/step2_segmentation"
+#   filename: "{epoch:02d}-{val_Dice:.4f}"
+#   save_last: true
+  
+# # Reproducibility
+# deterministic: false  # Set true for full reproducibility (slower)
+model:
+  type: "UNetPlusPlus"
+  in_channels: 1
+  out_channels: 1
+  features: [32, 64, 128, 256]  # 改进: 减少到4层 (原5层: [32,64,128,256,512])
+  deep_supervision: true
+  attention: "scse"
+  output_skeleton: true
+  output_confidence: true
+  output_boundary: true  # 新增: 边界输出
+
+# ========== 损失函数配置修改 ==========
+loss:
+  segmentation:
+    type: "DiceBCE"
+    dice_weight: 0.5  # 改进: 降低 (原0.7)
+    bce_weight: 0.2   # 改进: 降低 (原0.3)
+  
+  topology:
+    enabled: true
+    weight: 0.1
+    type: "ClDice"
+  
+  # 新增: 边界损失
+  boundary:
+    enabled: true
+    weight: 0.15
+  
+  # 新增: Hausdorff损失
+  hausdorff:
+    enabled: true
+    weight: 0.05
+  
+  # 新增: 小血管加权损失
+  small_vessel:
+    enabled: true
+    weight: 0.1
+  
+  deep_supervision_weights: [1.0, 0.5, 0.25]  # 改进: 适配4层网络 (原4个权重)
+
+# ========== 训练配置优化 ==========
+training:
+  batch_size: 2
+  accumulate_grad_batches: 4
+  max_epochs: 200
+  
+  optimizer:
+    type: "AdamW"
+    lr: 1e-4
+    weight_decay: 1e-5
+    betas: [0.9, 0.999]
+  
+  scheduler:
+    type: "CosineAnnealingLR"
+    T_max: 200
+    eta_min: 1e-6
+  
+  use_amp: true
+  gradient_clip_val: 1.0
+  
+  # 新增: 编译加速
+  use_compile: false  # PyTorch 2.0+ 可设为true
+
+# ========== 数据配置优化 ==========
+data:
+  dataset: "OCTA-500"
+  processed: "D:/babba/xxx/jingmaixianying/vessel_3d_recon/data/processed"  # 保持不变
+  image_size: [512, 512]
+  num_workers: 4
+  pin_memory: true
+  
+  augmentation:
+    enabled: true
+    # 以下参数已在datasets.py中优化，无需在此配置
+    # 主要改进:
+    # - 使用INTER_CUBIC插值
+    # - 添加AdaptiveCLAHE
+    # - 添加VesselContrastEnhancement
+    # - 降低弹性变形强度
+    # - 使用边界反射模式
+
+# ========== 评估指标 ==========
+metrics:
+  - "Dice"
+  - "IoU"
+  - "Precision"
+  - "Recall"
+  - "ClDice"
+  - "HD95"  # 新增: Hausdorff Distance 95%
+  - "Boundary_IoU"  # 新增: 边界IoU
+
+# ========== 其他配置保持不变 ==========
+experiment_name: "vessel_segmentation_unet"
+seed: 42
+device: "cuda"
+num_gpus: 1
+
+logging:
+  use_wandb: true
+  wandb_project: "vessel-3d-recon"
+  log_every_n_steps: 50
+  save_top_k: 3
+  monitor_metric: "val/Dice"
+  monitor_mode: "max"
+
+checkpoint:
+  dirpath: "checkpoints/step2_segmentation"  # 保持不变
+  filename: "{epoch:02d}-{val_Dice:.4f}"
+  save_last: true
+
+deterministic: false

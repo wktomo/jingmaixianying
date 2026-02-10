@@ -1,0 +1,161 @@
+# Step 4: 3D Gaussian Splatting SLAM Configuration
+
+defaults:
+  - _self_
+
+# Experiment
+experiment_name: "vessel_3dgs_slam"
+seed: 42
+device: "cuda"
+
+# Data
+data:
+  dataset: "OCTA-500"
+  sequence_length: 100  # Number of frames
+  image_size: [512, 512]
+  fps: 30
+  
+  # Camera parameters
+  camera:
+    fx: 500.0  # Focal length x
+    fy: 500.0  # Focal length y
+    cx: 256.0  # Principal point x
+    cy: 256.0  # Principal point y
+    distortion: [0.0, 0.0, 0.0, 0.0]  # Radial distortion coefficients
+
+# 3D Gaussian Splatting Model
+model:
+  # Gaussian parameters
+  gaussian:
+    initial_points: 10000  # Initial 3D points
+    max_points: 100000     # Maximum Gaussians
+    position_lr: 1.6e-4
+    rotation_lr: 1e-3
+    scale_lr: 5e-3
+    opacity_lr: 5e-2
+    feature_lr: 2.5e-3
+    
+    # Gaussian properties
+    sh_degree: 3  # Spherical harmonics degree for appearance
+    
+  # Densification
+  densification:
+    enabled: true
+    gradient_threshold: 0.0002
+    densify_interval: 100  # Every N iterations
+    opacity_threshold: 0.005
+    max_screen_size: 20
+    
+  # Pruning
+  pruning:
+    enabled: true
+    prune_interval: 100
+    opacity_threshold: 0.005
+    max_points: 100000
+
+# SLAM Configuration
+slam:
+  # Tracking
+  tracking:
+    method: "joint_optimization"  # Options: joint_optimization, icp, feature_matching
+    keyframe_interval: 5  # Select keyframe every N frames
+    max_iterations: 100
+    
+    # Keyframe selection criteria
+    keyframe_selection:
+      min_translation: 0.1  # meters
+      min_rotation: 5.0     # degrees
+      vessel_coverage: 0.3  # Prioritize frames with >30% vessel coverage
+  
+  # Mapping
+  mapping:
+    local_window_size: 10  # Local BA window
+    global_ba_interval: 50  # Global bundle adjustment every N keyframes
+    
+  # Loop closure
+  loop_closure:
+    enabled: true
+    min_distance: 10  # Minimum frames between loop candidates
+    similarity_threshold: 0.85
+
+# Vessel-Aware Modifications
+vessel_aware:
+  enabled: true
+  
+  # Photometric loss weighting
+  photometric_weighting:
+    vessel_weight: 2.0  # 2x weight in vessel regions
+    background_weight: 1.0
+    mask_threshold: 0.5
+  
+  # Depth supervision (if available)
+  depth_supervision:
+    enabled: false  # Set true if OCTA depth is available
+    weight: 0.1
+  
+  # Vessel-specific constraints
+  topology_constraint:
+    enabled: true
+    weight: 0.05
+    type: "connectivity_preserving"
+
+# Enhancement model (for input)
+enhancement:
+  checkpoint: "checkpoints/step3_enhancement/best_model.pth"
+  use_enhanced: true  # Use enhanced frames as input
+
+# Segmentation model (for vessel masks)
+segmentation:
+  checkpoint: "checkpoints/step2_segmentation/best_model.pth"
+
+# Training/Optimization
+optimization:
+  num_iterations: 30000
+  position_lr_init: 1.6e-4
+  position_lr_final: 1.6e-6
+  position_lr_delay_mult: 0.01
+  position_lr_max_steps: 30000
+  
+  # Loss weights
+  loss_weights:
+    rgb: 1.0
+    ssim: 0.2
+    vessel_weighted: 0.3
+    depth: 0.1  # If depth available
+    temporal: 0.05
+
+# Rendering
+rendering:
+  scaling_modifier: 1.0
+  antialiasing: false
+  
+# Evaluation
+evaluation:
+  render_test_views: true
+  compute_metrics: true
+  save_trajectory: true
+  export_mesh: true
+  mesh_resolution: 0.01
+
+# Logging
+logging:
+  use_wandb: true
+  wandb_project: "vessel-3d-recon"
+  log_every_n_iterations: 100
+  visualize_every_n_iterations: 500
+  save_checkpoint_every: 5000
+
+# Checkpoint
+checkpoint:
+  dirpath: "checkpoints/step4_slam"
+  save_interval: 5000
+  keep_last_n: 5
+
+# Output
+output:
+  save_dir: "outputs/reconstruction"
+  save_point_cloud: true
+  save_mesh: true
+  save_trajectory: true
+  save_rendered_video: true
+  mesh_format: "ply"  # or "obj"

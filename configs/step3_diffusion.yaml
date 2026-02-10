@@ -1,0 +1,157 @@
+# Step 3: Vessel-Aware Diffusion Enhancement Configuration
+
+defaults:
+  - _self_
+
+# Experiment
+experiment_name: "vessel_controlnet_enhancement"
+seed: 42
+device: "cuda"
+num_gpus: 1
+
+# Data
+data:
+  dataset: "OCTA-500"
+  data_root: "data/processed/octa500"
+  image_size: [512, 512]
+  num_workers: 4
+  pin_memory: true
+  
+  # Paired data: noisy input + enhanced target
+  use_synthetic_pairs: true  # Generate synthetic degraded images
+  degradation:
+    gaussian_noise: [0.01, 0.0z5]
+    motion_blur: [3, 7]
+    low_contrast: true
+
+# Model
+model:
+  # Base diffusion model
+  base_model: "runwayml/stable-diffusion-v1-5"  # or "runwayml/stable-diffusion-v1-5"
+  
+  # ControlNet
+  controlnet:
+    conditioning_channels: 3  # mask + skeleton + edge
+    num_control_scales: 3  # Multi-scale injection
+    control_mode: "vessel_aware"
+    
+    # Architecture
+    down_block_types:
+      - "CrossAttnDownBlock2D"
+      - "CrossAttnDownBlock2D"
+      - "CrossAttnDownBlock2D"
+      - "DownBlock2D"
+    
+    # Control scales at different resolutions
+    control_scales: [1.0, 0.5, 0.25]
+  
+  # Frozen vs trainable
+  freeze_base_model: true  # Only train ControlNet initially
+  
+  # Inference
+  num_inference_steps: 20  # DDIM sampling
+  guidance_scale: 7.5
+
+# Segmentation model (for conditioning)
+segmentation:
+  checkpoint: "checkpoints/step2_segmentation/best_model.pth"
+  freeze: true
+
+# Training
+training:
+  batch_size: 4  # Diffusion models need more VRAM
+  accumulate_grad_batches: 8  # Effective batch size = 32
+  max_epochs: 100
+  val_check_interval: 0.5
+  
+  # Two-stage training
+  stage1:
+    # Train only ControlNet
+    epochs: 50
+    freeze_base: true
+  
+  stage2:
+    # Joint fine-tuning
+    epochs: 50
+    freeze_base: false
+    base_lr_scale: 0.1  # Lower LR for base model
+  
+  # Optimizer
+  optimizer:
+    type: "AdamW"
+    lr: 5e-5
+    weight_decay: 1e-4
+    betas: [0.9, 0.999]
+  
+  # Scheduler
+  scheduler:
+    type: "CosineAnnealingWarmRestarts"
+    T_0: 10
+    T_mult: 2
+    eta_min: 1e-7
+  
+  # Mixed precision
+  use_amp: true
+  gradient_checkpointing: true  # Save VRAM
+  gradient_clip_val: 1.0
+
+# Loss
+loss:
+  # Main diffusion loss (denoising objective)
+  diffusion:
+    type: "MSE"  # Noise prediction loss
+    weight: 1.0
+  
+  # Vessel region-aware loss
+  vessel_region:
+    enabled: true
+    weight: 0.3
+    mask_threshold: 0.5  # Pixels with mask > 0.5 get higher weight
+    vessel_weight: 2.0   # 2x loss weight in vessel regions
+  
+  # Topology consistency
+  topology:
+    enabled: true
+    weight: 0.1
+    type: "skeleton_preserving"  # Ensure skeleton connectivity
+  
+  # Perceptual loss (optional)
+  perceptual:
+    enabled: false
+    weight: 0.05
+    layers: ["relu1_2", "relu2_2", "relu3_3"]
+
+# Metrics
+metrics:
+  # Image quality
+  - "PSNR"
+  - "SSIM"
+  - "LPIPS"
+  
+  # Vessel-specific
+  - "VesselVisibilityBoost"  # Custom metric
+  - "SkeletonPreservation"
+
+# Logging
+logging:
+  use_wandb: true
+  wandb_project: "vessel-3d-recon"
+  log_every_n_steps: 100
+  log_images_every_n_epochs: 2
+  num_log_images: 4
+  save_top_k: 3
+  monitor_metric: "val/PSNR"
+  monitor_mode: "max"
+
+# Checkpoint
+checkpoint:
+  dirpath: "checkpoints/step3_enhancement"
+  filename: "{epoch:02d}-{val_PSNR:.2f}"
+  save_last: true
+
+# Memory optimization
+memory:
+  enable_xformers: true  # Memory-efficient attention
+  enable_attention_slicing: true
+  enable_vae_slicing: true
+  gradient_checkpointing: true
